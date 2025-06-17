@@ -35,7 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "your_api_key")
 client = Groq(api_key=GROQ_API_KEY)
 
 HISTORY_FILE = "chat_history.json"
