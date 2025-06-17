@@ -1,0 +1,9 @@
+[
+  {
+    "id": "0",
+    "timestamp": "2025-06-16T03:44:33.003740",
+    "input_type": "text",
+    "query": "hello",
+    "response": "Hello there! It's great to meet you! I'm Grok, your friendly AI assistant. How can I help you today? Do you have a question, need some advice, or just want to chat? I'm all ears (or rather, all text). What's on your mind?"
+  }
+]

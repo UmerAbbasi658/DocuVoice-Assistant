@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice & Text Chatbot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .chat-bubble-user {
+      background-color: #1e40af; /* Blue-800 */
+      color: white;
+      border-radius: 1rem 1rem 0 1rem;
+      max-width: 70%;
+      align-self: flex-end;
+    }
+    .chat-bubble-bot {
+      background-color: #e5e7eb; /* Gray-200 */
+      color: black;
+      border-radius: 1rem 1rem 1rem 0;
+      max-width: 70%;
+      align-self: flex-start;
+    }
+    .loading-bubble {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #1e40af; /* Blue-800 */
+      animation: bounce 0.4s infinite alternate;
+      margin: 0 2px;
+    }
+    .loading-bubble:nth-child(2) { animation-delay: 0.2s; }
+    .loading-bubble:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      to { transform: translateY(-6px); }
+    }
+    .recording-pulse {
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body class="bg-gray-900 flex h-screen">
+  <!-- Sidebar: Chat History -->
+  <div class="w-1/4 bg-black text-white shadow-lg p-4 overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold text-white">Chat History</h2>
+      <div class="space-x-2">
+        <button
+          id="newChatButton"
+          class="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+        >
+          New Chat
+        </button>
+        <button
+          id="clearHistoryButton"
+          class="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+        >
+          Clear History
+        </button>
+      </div>
+    </div>
+    <div id="historyList" class="space-y-2"></div>
+  </div>
+
+  <!-- Main Chat Area -->
+  <div class="flex-1 flex flex-col">
+    <!-- Chat Display -->
+    <div id="chatDisplay" class="flex-1 p-4 overflow-y-auto bg-gray-800">
+      <div id="pdfStatus" class="hidden text-green-400 mb-2">
+        <span class="inline-flex items-center">
+          <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          PDF Uploaded
+        </span>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <div class="p-4 bg-black border-t border-gray-700 flex items-center space-x-2">
+      <input
+        id="textInput"
+        type="text"
+        placeholder="Type your message..."
+        class="flex-1 p-2 border border-gray-600 rounded-lg bg-gray-900 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+      <label class="flex items-center space-x-1 text-white text-sm">
+        <input id="fromPdfCheckbox" type="checkbox">
+        <span>From PDF</span>
+      </label>
+      <button
+        id="sendButton"
+        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+      >
+        Send
+      </button>
+      <button
+        id="recordButton"
+        class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600"
+      >
+        Record
+      </button>
+      <button
+        id="stopButton"
+        class="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 hidden"
+      >
+        Stop
+      </button>
+      <label
+        class="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 cursor-pointer"
+      >
+        Upload PDF
+        <input id="pdfUpload" type="file" accept=".pdf" class="hidden">
+      </label>
+    </div>
+  </div>
+
+  <script>
+    const chatDisplay = document.getElementById('chatDisplay');
+    const historyList = document.getElementById('historyList');
+    const textInput = document.getElementById('textInput');
+    const fromPdfCheckbox = document.getElementById('fromPdfCheckbox');
+    const sendButton = document.getElementById('sendButton');
+    const recordButton = document.getElementById('recordButton');
+    const stopButton = document.getElementById('stopButton');
+    const newChatButton = document.getElementById('newChatButton');
+    const clearHistoryButton = document.getElementById('clearHistoryButton');
+    const pdfUpload = document.getElementById('pdfUpload');
+    const pdfStatus = document.getElementById('pdfStatus');
+    let mediaRecorder;
+    let chunks = [];
+
+    // Load chat display from localStorage
+    function loadChatDisplay() {
+      const savedChat = localStorage.getItem('chatDisplay');
+      if (savedChat) {
+        chatDisplay.innerHTML = savedChat;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+      }
+      checkPdfStatus();
+    }
+
+    // Save chat display to localStorage
+    function saveChatDisplay() {
+      localStorage.setItem('chatDisplay', chatDisplay.innerHTML);
+    }
+
+    // Check PDF upload status
+    async function checkPdfStatus() {
+      try {
+        const response = await fetch('/pdf_status');
+        const data = await response.json();
+        pdfStatus.classList.toggle('hidden', !data.pdf_uploaded);
+      } catch (error) {
+        console.error('Error checking PDF status:', error);
+      }
+    }
+
+    // Load chat history
+    async function loadHistory() {
+      try {
+        const response = await fetch('/chat_history');
+        const history = await response.json();
+        historyList.innerHTML = '';
+        if (history.length === 0) {
+          historyList.innerHTML = '<p class="text-sm text-gray-400">No history available.</p>';
+          return;
+        }
+        history.forEach(msg => {
+          const div = document.createElement('div');
+          div.className = 'p-2 bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-700';
+          div.innerHTML = `
+            <p class="text-sm text-gray-400">${new Date(msg.timestamp).toLocaleString()}</p>
+            <p class="text-sm font-semibold text-white">${msg.input_type === 'voice' ? '🎙️' : '💬'} ${msg.query}</p>
+            <p class="text-sm text-gray-400">${msg.response.substring(0, 50)}...</p>
+          `;
+          div.addEventListener('click', () => {
+            chatDisplay.innerHTML += `
+              <div class="chat-bubble-user p-3 mb-2">${msg.query}<p class="text-xs text-gray-300">${new Date(msg.timestamp).toLocaleTimeString()}</p></div>
+              <div class="chat-bubble-bot p-3 mb-2">${msg.response}<p class="text-xs text-gray-600">${new Date(msg.timestamp).toLocaleTimeString()}</p></div>
+            `;
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+            saveChatDisplay();
+          });
+          historyList.appendChild(div);
+        });
+      } catch (error) {
+        console.error('Error loading history:', error);
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error loading history: ${error.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+      }
+    }
+
+    // Clear chat history with confirmation
+    async function clearHistory() {
+      if (!confirm('Are you sure you want to clear all chat history?')) return;
+      try {
+        const response = await fetch('/clear_history', { method: 'DELETE' });
+        const data = await response.json();
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-green-400">${data.message}</div>`;
+        pdfStatus.classList.add('hidden');
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        historyList.innerHTML = '<p class="text-sm text-gray-400">No history available.</p>';
+        saveChatDisplay();
+      } catch (error) {
+        console.error('Error clearing history:', error);
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error clearing history: ${error.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+      }
+    }
+
+    // Start new chat
+    function newChat() {
+      chatDisplay.innerHTML = '';
+      checkPdfStatus();
+      saveChatDisplay();
+    }
+
+    // Send text message
+    async function sendTextMessage() {
+      const query = textInput.value.trim();
+      if (!query) return;
+      textInput.value = '';
+      const timestamp = new Date().toLocaleTimeString();
+      chatDisplay.innerHTML += `<div class="chat-bubble-user p-3 mb-2">${query}<p class="text-xs text-gray-300">${timestamp}</p></div>`;
+      chatDisplay.scrollTop = chatDisplay.scrollHeight;
+      saveChatDisplay();
+
+      try {
+        const response = await fetch('/process_text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, from_pdf: fromPdfCheckbox.checked })
+        });
+        const data = await response.json();
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2">${data.response}<p class="text-xs text-gray-600">${timestamp}</p></div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+        loadHistory();
+      } catch (error) {
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error: ${error.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+      }
+    }
+
+    // Handle voice recording
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const supportedMimeTypes = [
+          'audio/webm;codecs=opus',
+          'audio/mp4',
+          'audio/webm',
+          'audio/ogg;codecs=opus'
+        ];
+        let mimeType = 'audio/webm';
+        for (const type of supportedMimeTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            mimeType = type;
+            break;
+          }
+        }
+        console.log(`Using MIME type: ${mimeType}`);
+
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        chunks = [];
+        mediaRecorder.ondataavailable = event => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunks, { type: mimeType });
+          const formData = new FormData();
+          formData.append('audio', blob, `recording.${mimeType.split('/')[1].split(';')[0]}`);
+
+          chatDisplay.innerHTML += `
+            <div class="chat-bubble-user p-3 mb-2">
+              Converting speech to text...
+              <span class="loading-bubble"></span>
+              <span class="loading-bubble"></span>
+              <span class="loading-bubble"></span>
+            </div>
+          `;
+          chatDisplay.scrollTop = chatDisplay.scrollHeight;
+          saveChatDisplay();
+
+          try {
+            const response = await fetch('/process_voice', {
+              method: 'POST',
+              body: formData
+            });
+            const data = await response.json();
+            chatDisplay.lastElementChild.remove();
+            const timestamp = new Date().toLocaleTimeString();
+            chatDisplay.innerHTML += `
+              <div class="chat-bubble-user p-3 mb-2">${data.query}<p class="text-xs text-gray-300">${timestamp}</p></div>
+              <div class="chat-bubble-bot p-3 mb-2">${data.response}<p class="text-xs text-gray-600">${timestamp}</p></div>
+            `;
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+            saveChatDisplay();
+            loadHistory();
+          } catch (error) {
+            chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error: ${error.message}</div>`;
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+            saveChatDisplay();
+          }
+        };
+
+        mediaRecorder.start();
+        recordButton.classList.add('recording-pulse', 'hidden');
+        stopButton.classList.remove('hidden');
+        setTimeout(stopRecording, 30000);
+      } catch (error) {
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error starting recording: ${error.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        recordButton.classList.remove('recording-pulse', 'hidden');
+        stopButton.classList.add('hidden');
+      }
+    }
+
+    // Handle PDF upload
+    pdfUpload.addEventListener('change', async () => {
+      const file = pdfUpload.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const response = await fetch('/upload_pdf', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-green-400">${data.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        pdfStatus.classList.remove('hidden');
+        saveChatDisplay();
+      } catch (error) {
+        chatDisplay.innerHTML += `<div class="chat-bubble-bot p-3 mb-2 text-red-500">Error uploading PDF: ${error.message}</div>`;
+        chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        saveChatDisplay();
+      }
+      pdfUpload.value = ''; // Reset file input
+    });
+
+    // Event listeners
+    sendButton.addEventListener('click', sendTextMessage);
+    textInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendTextMessage();
+    });
+    recordButton.addEventListener('click', startRecording);
+    stopButton.addEventListener('click', stopRecording);
+    newChatButton.addEventListener('click', newChat);
+    clearHistoryButton.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear all chat history?')) clearHistory();
+    });
+
+    // Initial load
+    loadHistory();
+    loadChatDisplay();
+  </script>
+</body>
+</html>
